@@ -1,0 +1,19 @@
+{
+  "desktops": [
+    {
+      "name": "test1",
+      "apps": [
+        { "path": "explorer"},
+        { "path": "chrome", "fullscreen": true }
+      ],
+      "wallpaperAbsolutePath": ""
+    },
+    {
+      "name": "test2",
+      "apps": [
+        { "path": "cmd" }
+      ],
+      "wallpaperAbsolutePath": "C:\\localfile\\wallpaper\\test.jpg"
+    }
+  ]
+}
