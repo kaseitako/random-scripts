@@ -32,6 +32,12 @@ PS C:\> Install-Module VirtualDesktop
 %APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar
 ```
 
+- Windows Storeでインストールしたアプリはexeが難しい場所にあるので、以下のフォルダからショートカットを作成してショートカットを起動するとよい
+
+```plaintext
+shell:AppsFolder
+```
+
 - スタートアップで実行させたい場合は、以下にショートカットを配置すれば良い
 
 ```plaintext

@@ -6,7 +6,8 @@
         { "path": "explorer"},
         { "path": "chrome", "fullscreen": true }
       ],
-      "wallpaperAbsolutePath": ""
+      "wallpaperAbsolutePath": "",
+      "waitSeconds": 5
     },
     {
       "name": "test2",

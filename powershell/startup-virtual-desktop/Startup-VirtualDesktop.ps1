@@ -55,12 +55,18 @@ foreach ($desktop in $json.desktops) {
 	}
 
 	# 壁紙のパスが存在する場合は、その壁紙に変更する
-	if (Test-Path -Path $desktop.wallpaperAbsolutePath) {
-		[wallpaper]::SetWallpaper($desktop.wallpaperAbsolutePath)
+	if (-not [string]::IsNullOrEmpty($desktop.wallpaperAbsolutePath)) {
+		if (Test-Path -Path $desktop.wallpaperAbsolutePath -PathType Leaf) {
+			[wallpaper]::SetWallpaper($desktop.wallpaperAbsolutePath)
+		}
 	}
 
-	Start-Sleep 3
+	$waitSecounds = $(if ($null -eq $desktop.waitSeconds) { 3 } else { $desktop.waitSeconds })
+	Start-Sleep $waitSecounds
 }
 
 Switch-Desktop $currentDesktop
-Write-Output "仮想デスクトップとアプリケーションの起動が完了しました。"
+
+Write-Output "仮想デスクトップとアプリケーションの起動が完了しました。10秒後にこのスクリプトは終了します。"
+Start-Sleep 10
+exit
