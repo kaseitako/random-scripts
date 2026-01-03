@@ -1,0 +1,30 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/java
+{
+	"name": "Java",
+	// https://hub.docker.com/r/microsoft/devcontainers-java
+	"image": "mcr.microsoft.com/devcontainers/java:1-21-bullseye",
+
+	"features": {
+		"ghcr.io/devcontainers/features/java:1": {},
+		"ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {},
+
+		"ghcr.io/anthropics/devcontainer-features/claude-code:latest": {}
+	},
+
+	"customizations": {
+    "vscode": {
+      "extensions": [
+        "Oracle.oracle-java"
+      ],
+      "settings": {}
+    }
+  },
+
+	// "forwardPorts": [],
+	"postCreateCommand": "npm install -g ccusage cc-sdd"
+	// "customizations": {},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}

@@ -1,0 +1,10 @@
+{
+	"name": "CC",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+
+	"features": {
+		"ghcr.io/anthropics/devcontainer-features/claude-code:latest": {}
+	},
+
+	"postCreateCommand": "npm install -g ccusage cc-sdd"
+}
