@@ -213,3 +213,190 @@ Describe 'Wait-ApplicationWindow' {
         $result | Should BeNullOrEmpty
     }
 }
+
+function New-OrchestrationSettings {
+    param(
+        [object[]]$Apps
+    )
+
+    ConvertTo-DesktopLayoutSettings -InputObject ([pscustomobject]@{
+        desktops = @([pscustomobject]@{
+            name = 'Main'
+            wallpaperAbsolutePath = ''
+            apps = $Apps
+        })
+    })
+}
+
+function New-ResolvedTestApp {
+    param(
+        [object]$App
+    )
+
+    [pscustomobject]@{
+        path = $App.path
+        arguments = @($App.arguments)
+        workingDirectory = $App.workingDirectory
+        timeoutSeconds = $App.timeoutSeconds
+        onExisting = $App.onExisting
+        maximized = $App.maximized
+        windowMatch = $App.windowMatch
+        inferredProcessName = [System.IO.Path]::GetFileNameWithoutExtension($App.path)
+        preferredTitle = ''
+        startedProcessId = 0
+    }
+}
+
+Describe 'Invoke-DesktopLayout' {
+    BeforeEach {
+        $script:now = [datetime]'2026-08-09T00:00:00Z'
+        $script:windows = @()
+        $script:startCount = 0
+        $script:moveCount = 0
+        $script:maximizeCount = 0
+        $script:targetDesktop = [pscustomobject]@{ Name = 'Main'; Id = 'desktop-main' }
+
+        $script:adapter = [pscustomobject]@{
+            GetOrCreateDesktop = { param($Name) $script:targetDesktop }
+            SetWallpaper = { param($Desktop, $Path) }
+            ResolveApplication = { param($App) New-ResolvedTestApp -App $App }
+            GetWindows = { @($script:windows) }
+            StartApplication = {
+                param($App)
+                $script:startCount++
+                [pscustomobject]@{ ProcessId = 0 }
+            }
+            MoveWindow = {
+                param($Desktop, $Window)
+                $script:moveCount++
+                $Window.Desktop = $Desktop.Name
+            }
+            TestWindow = { param($Desktop, $Window) $Window.Desktop -eq $Desktop.Name }
+            MaximizeWindow = {
+                param($Window)
+                $script:maximizeCount++
+                $Window.Maximized = $true
+            }
+            GetUtcNow = { $script:now }
+            Wait = { param($Milliseconds) $script:now = $script:now.AddMilliseconds($Milliseconds) }
+        }
+    }
+
+    It 'moves and verifies an existing matching window without launching' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'notepad'
+            Title = 'Untitled - Notepad'
+            ClassName = 'Notepad'
+            Desktop = 'Other'
+            Maximized = $false
+        })
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad'; maximized = $true })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results.Count | Should Be 1
+        $results[0].Status | Should Be 'Moved'
+        $results[0].Handle | Should Be 42
+        $script:windows[0].Desktop | Should Be 'Main'
+        $script:windows[0].Maximized | Should Be $true
+        $script:startCount | Should Be 0
+        $script:moveCount | Should Be 1
+        $script:maximizeCount | Should Be 1
+    }
+
+    It 'reports an already placed matching window' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Main'; Maximized = $false
+        })
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'AlreadyPlaced'
+        $script:moveCount | Should Be 0
+        $script:startCount | Should Be 0
+    }
+
+    It 'launches and selects the newly appearing window' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]7; ProcessId = 70; ProcessName = 'notepad'; Title = 'Old'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+        })
+        $script:adapter.StartApplication = {
+            param($App)
+            $script:startCount++
+            $script:windows += [pscustomobject]@{
+                Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'New'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+            }
+            [pscustomobject]@{ ProcessId = 100 }
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad'; onExisting = 'Launch' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Moved'
+        $results[0].Handle | Should Be 42
+        $script:startCount | Should Be 1
+    }
+
+    It 'returns failed when movement cannot be verified' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+        })
+        $script:adapter.MoveWindow = { param($Desktop, $Window) $script:moveCount++ }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Failed'
+        $results[0].Error | Should Match 'verification'
+    }
+
+    It 'continues after an application timeout' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+        })
+        $settings = New-OrchestrationSettings @(
+            [pscustomobject]@{ path = 'missing'; timeoutSeconds = 1 },
+            [pscustomobject]@{ path = 'notepad'; timeoutSeconds = 1 }
+        )
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results.Count | Should Be 2
+        $results[0].Status | Should Be 'Failed'
+        $results[0].Error | Should Match 'Timed out'
+        $results[1].Status | Should Be 'Moved'
+    }
+
+    It 'does not assign one handle to two application entries' {
+        $script:windows = @(
+            [pscustomobject]@{ Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'First'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false },
+            [pscustomobject]@{ Handle = [long]43; ProcessId = 101; ProcessName = 'notepad'; Title = 'Second'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false }
+        )
+        $settings = New-OrchestrationSettings @(
+            [pscustomobject]@{ path = 'notepad' },
+            [pscustomobject]@{ path = 'notepad' }
+        )
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results.Count | Should Be 2
+        $results[0].Handle | Should Be 42
+        $results[1].Handle | Should Be 43
+    }
+
+    It 'honors Skip for an existing matching window' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+        })
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad'; onExisting = 'Skip' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Skipped'
+        $script:moveCount | Should Be 0
+        $script:startCount | Should Be 0
+    }
+}

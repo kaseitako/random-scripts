@@ -288,9 +288,233 @@ function Wait-ApplicationWindow {
     }
 }
 
+function Get-BestApplicationWindow {
+    param(
+        [Parameter(Mandatory)]
+        [object]$App,
+
+        [Parameter(Mandatory)]
+        [object[]]$Windows,
+
+        [Parameter(Mandatory)]
+        [hashtable]$ExcludedHandles
+    )
+
+    $bestWindow = $null
+    $bestScore = -1
+    foreach ($window in $Windows) {
+        $score = Get-WindowMatchScore -Window $window -App $App -NewHandles @{} -ExcludedHandles $ExcludedHandles
+        $handle = [long]$window.Handle
+        if ($score -gt $bestScore -or
+            ($score -eq $bestScore -and $score -ge 0 -and $null -ne $bestWindow -and $handle -lt [long]$bestWindow.Handle)) {
+            $bestScore = $score
+            $bestWindow = $window
+        }
+    }
+
+    if ($bestScore -lt 0) {
+        return $null
+    }
+
+    return $bestWindow
+}
+
+function New-ApplicationResult {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DesktopName,
+
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [long]$Handle = 0,
+
+        [string]$ProcessName = '',
+
+        [long]$ElapsedMilliseconds = 0,
+
+        [string]$Error = ''
+    )
+
+    return [pscustomobject]@{
+        DesktopName = $DesktopName
+        Path = $Path
+        Status = $Status
+        Handle = $Handle
+        ProcessName = $ProcessName
+        ElapsedMilliseconds = $ElapsedMilliseconds
+        Error = $Error
+    }
+}
+
+function Write-DesktopLayoutLog {
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Log,
+
+        [Parameter(Mandatory)]
+        [string]$Level,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [AllowNull()]
+        [object]$Data
+    )
+
+    try {
+        & $Log $Level $Message $Data
+    } catch {
+        Write-Warning "Layout logger failed: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-DesktopLayout {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$Settings,
+
+        [Parameter(Mandatory)]
+        [object]$Adapter,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$Log
+    )
+
+    $null = Test-DesktopLayoutSettings -Settings $Settings
+    $results = [System.Collections.Generic.List[object]]::new()
+    $assignedHandles = @{}
+    $desktopsByName = @{}
+    $desktopErrors = @{}
+    $getUtcNow = $Adapter.GetUtcNow
+    $getOrCreateDesktop = $Adapter.GetOrCreateDesktop
+    $setWallpaper = $Adapter.SetWallpaper
+    $resolveApplication = $Adapter.ResolveApplication
+    $getWindows = $Adapter.GetWindows
+    $startApplication = $Adapter.StartApplication
+    $moveWindow = $Adapter.MoveWindow
+    $testWindow = $Adapter.TestWindow
+    $maximizeWindow = $Adapter.MaximizeWindow
+
+    foreach ($desktop in @($Settings.desktops)) {
+        try {
+            $desktopObject = & $getOrCreateDesktop $desktop.name
+            $desktopsByName[$desktop.name] = $desktopObject
+            Write-DesktopLayoutLog -Log $Log -Level 'Info' -Message 'Desktop ready.' -Data @{
+                desktopName = $desktop.name
+            }
+        } catch {
+            $desktopErrors[$desktop.name] = $_.Exception.Message
+            Write-DesktopLayoutLog -Log $Log -Level 'Error' -Message 'Desktop creation failed.' -Data @{
+                desktopName = $desktop.name
+                error = $_.Exception.Message
+            }
+        }
+    }
+
+    foreach ($desktop in @($Settings.desktops)) {
+        if ($desktopErrors.ContainsKey($desktop.name)) {
+            foreach ($app in @($desktop.apps)) {
+                $results.Add((New-ApplicationResult -DesktopName $desktop.name -Path $app.path -Status 'Failed' -Error "Desktop creation failed: $($desktopErrors[$desktop.name])"))
+            }
+            continue
+        }
+
+        $targetDesktop = $desktopsByName[$desktop.name]
+        if (-not [string]::IsNullOrWhiteSpace($desktop.wallpaperAbsolutePath)) {
+            try {
+                $null = & $setWallpaper $targetDesktop $desktop.wallpaperAbsolutePath
+            } catch {
+                Write-DesktopLayoutLog -Log $Log -Level 'Warning' -Message 'Wallpaper update failed.' -Data @{
+                    desktopName = $desktop.name
+                    path = $desktop.wallpaperAbsolutePath
+                    error = $_.Exception.Message
+                }
+            }
+        }
+
+        foreach ($configuredApp in @($desktop.apps)) {
+            $startedAt = & $getUtcNow
+            $window = $null
+            try {
+                $app = & $resolveApplication $configuredApp
+                $windowsBeforeLaunch = @(& $getWindows)
+                $existingWindow = $null
+                if ($app.onExisting -ne 'Launch') {
+                    $existingWindow = Get-BestApplicationWindow -App $app -Windows $windowsBeforeLaunch -ExcludedHandles $assignedHandles
+                }
+
+                if ($null -ne $existingWindow) {
+                    $window = $existingWindow
+                    $assignedHandles[[string][long]$window.Handle] = $true
+                    if ($app.onExisting -eq 'Skip') {
+                        $elapsed = [long]((& $getUtcNow) - $startedAt).TotalMilliseconds
+                        $result = New-ApplicationResult -DesktopName $desktop.name -Path $app.path -Status 'Skipped' -Handle ([long]$window.Handle) -ProcessName ([string]$window.ProcessName) -ElapsedMilliseconds $elapsed
+                        $results.Add($result)
+                        Write-DesktopLayoutLog -Log $Log -Level 'Info' -Message 'Existing application window skipped.' -Data $result
+                        continue
+                    }
+                } else {
+                    $beforeHandles = @{}
+                    foreach ($beforeWindow in $windowsBeforeLaunch) {
+                        $beforeHandles[[string][long]$beforeWindow.Handle] = $true
+                    }
+
+                    $launchInfo = & $startApplication $app
+                    if ($null -ne $launchInfo -and $null -ne $launchInfo.PSObject.Properties['ProcessId']) {
+                        if ($null -ne $app.PSObject.Properties['startedProcessId']) {
+                            $app.startedProcessId = [int]$launchInfo.ProcessId
+                        } else {
+                            $app | Add-Member -NotePropertyName startedProcessId -NotePropertyValue ([int]$launchInfo.ProcessId)
+                        }
+                    }
+
+                    $window = Wait-ApplicationWindow -App $app -Adapter $Adapter -BeforeHandles $beforeHandles -ExcludedHandles $assignedHandles
+                    if ($null -eq $window) {
+                        throw "Timed out after $($app.timeoutSeconds) seconds waiting for an application window."
+                    }
+                    $assignedHandles[[string][long]$window.Handle] = $true
+                }
+
+                $status = 'AlreadyPlaced'
+                if (-not (& $testWindow $targetDesktop $window)) {
+                    $null = & $moveWindow $targetDesktop $window
+                    if (-not (& $testWindow $targetDesktop $window)) {
+                        throw 'Window movement verification failed.'
+                    }
+                    $status = 'Moved'
+                }
+
+                if ($app.maximized) {
+                    $null = & $maximizeWindow $window
+                }
+
+                $elapsed = [long]((& $getUtcNow) - $startedAt).TotalMilliseconds
+                $result = New-ApplicationResult -DesktopName $desktop.name -Path $app.path -Status $status -Handle ([long]$window.Handle) -ProcessName ([string]$window.ProcessName) -ElapsedMilliseconds $elapsed
+                $results.Add($result)
+                Write-DesktopLayoutLog -Log $Log -Level 'Info' -Message 'Application reconciled.' -Data $result
+            } catch {
+                $elapsed = [long]((& $getUtcNow) - $startedAt).TotalMilliseconds
+                $handle = if ($null -ne $window) { [long]$window.Handle } else { 0 }
+                $processName = if ($null -ne $window) { [string]$window.ProcessName } else { '' }
+                $result = New-ApplicationResult -DesktopName $desktop.name -Path $configuredApp.path -Status 'Failed' -Handle $handle -ProcessName $processName -ElapsedMilliseconds $elapsed -Error $_.Exception.Message
+                $results.Add($result)
+                Write-DesktopLayoutLog -Log $Log -Level 'Error' -Message 'Application reconciliation failed.' -Data $result
+            }
+        }
+    }
+
+    return $results.ToArray()
+}
+
 Export-ModuleMember -Function @(
     'ConvertTo-DesktopLayoutSettings',
     'Test-DesktopLayoutSettings',
     'Get-WindowMatchScore',
-    'Wait-ApplicationWindow'
+    'Wait-ApplicationWindow',
+    'Invoke-DesktopLayout'
 )
