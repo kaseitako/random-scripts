@@ -163,6 +163,7 @@ function Get-WindowMatchScore {
     if (Test-HandleInSet -Set $ExcludedHandles -Handle $handle) {
         return -1
     }
+    $isNewHandle = Test-HandleInSet -Set $NewHandles -Handle $handle
 
     $score = 0
     $hasExplicitMatch = $false
@@ -200,9 +201,12 @@ function Get-WindowMatchScore {
 
         if (-not [string]::IsNullOrWhiteSpace($inferredProcessName)) {
             if (-not ([string]$Window.ProcessName).Equals($inferredProcessName, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return -1
+                if (-not $isNewHandle) {
+                    return -1
+                }
+            } else {
+                $score += 40
             }
-            $score += 40
         }
 
         $preferredTitle = if (Test-ObjectProperty -InputObject $App -Name 'preferredTitle') {
@@ -225,7 +229,7 @@ function Get-WindowMatchScore {
         }
     }
 
-    if (Test-HandleInSet -Set $NewHandles -Handle $handle) {
+    if ($isNewHandle) {
         $score += 50
     }
 

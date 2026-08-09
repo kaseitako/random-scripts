@@ -163,6 +163,22 @@ Describe 'Get-WindowMatchScore' {
     It 'rejects a previously assigned handle' {
         Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{} -ExcludedHandles @{ 42 = $true } | Should Be -1
     }
+
+    It 'allows a new launcher window whose process name differs' {
+        $script:app.inferredProcessName = 'LineLauncher'
+        $script:window.ProcessName = 'LINE'
+
+        $newScore = Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{ 42 = $true } -ExcludedHandles @{}
+
+        $newScore | Should BeGreaterThan 0
+    }
+
+    It 'rejects an existing window whose process name differs' {
+        $script:app.inferredProcessName = 'LineLauncher'
+        $script:window.ProcessName = 'LINE'
+
+        Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{} -ExcludedHandles @{} | Should Be -1
+    }
 }
 
 Describe 'Wait-ApplicationWindow' {
