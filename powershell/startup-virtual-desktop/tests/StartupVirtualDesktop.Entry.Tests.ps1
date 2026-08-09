@@ -18,10 +18,13 @@ function Invoke-EntryScriptProcess {
         '-ValidateOnly'
     )
     $process = Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList $arguments -Wait -PassThru -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
+    $redirectEncoding = [Console]::OutputEncoding
+    $standardOutputText = $redirectEncoding.GetString([IO.File]::ReadAllBytes($standardOutput))
+    $standardErrorText = $redirectEncoding.GetString([IO.File]::ReadAllBytes($standardError))
 
     [pscustomobject]@{
         ExitCode = $process.ExitCode
-        Output = ((Get-Content -LiteralPath $standardOutput -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $standardError -Raw -ErrorAction SilentlyContinue))
+        Output = $standardOutputText + $standardErrorText
     }
 }
 
@@ -46,8 +49,8 @@ Describe 'Startup-VirtualDesktop.ps1' {
             { $line | ConvertFrom-Json -ErrorAction Stop } | Should Not Throw
         }
         $messages = @(Get-Content -LiteralPath $logFiles[0].FullName | ForEach-Object { ($_ | ConvertFrom-Json).message })
-        $messages | Should Contain '起動環境を検出しました。'
-        $messages | Should Contain '設定の検証に成功しました。'
+        ($messages -contains '起動環境を検出しました。') | Should Be $true
+        ($messages -contains '設定の検証に成功しました。') | Should Be $true
     }
 
     It 'fails validation for a missing settings file' {
