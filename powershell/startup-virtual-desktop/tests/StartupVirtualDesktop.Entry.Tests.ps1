@@ -4,7 +4,10 @@ $samplePath = Join-Path $projectPath 'virtual-desktop-setting.sample.json'
 
 function Invoke-EntryScriptProcess {
     param(
-        [string]$SettingsPath,
+        [AllowEmptyString()]
+        [string]$SettingsPath = '',
+
+        [Parameter(Mandatory)]
         [string]$LogDirectory
     )
 
@@ -13,10 +16,12 @@ function Invoke-EntryScriptProcess {
     $standardError = Join-Path $TestDrive "$id.stderr.txt"
     $arguments = @(
         '-NoLogo', '-NoProfile', '-File', $script:scriptPath,
-        '-SettingsPath', $SettingsPath,
         '-LogDirectory', $LogDirectory,
         '-ValidateOnly'
     )
+    if (-not [string]::IsNullOrWhiteSpace($SettingsPath)) {
+        $arguments += @('-SettingsPath', $SettingsPath)
+    }
     $process = Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList $arguments -Wait -PassThru -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
     $redirectEncoding = [Console]::OutputEncoding
     $standardOutputText = $redirectEncoding.GetString([IO.File]::ReadAllBytes($standardOutput))
@@ -51,6 +56,20 @@ Describe 'Startup-VirtualDesktop.ps1' {
         $messages = @(Get-Content -LiteralPath $logFiles[0].FullName | ForEach-Object { ($_ | ConvertFrom-Json).message })
         ($messages -contains '起動環境を検出しました。') | Should Be $true
         ($messages -contains '設定の検証に成功しました。') | Should Be $true
+    }
+
+    It 'uses the default settings path when SettingsPath is omitted' {
+        $logDirectory = Join-Path $TestDrive 'default-settings-logs'
+
+        Push-Location $TestDrive
+        try {
+            $result = Invoke-EntryScriptProcess -LogDirectory $logDirectory
+        } finally {
+            Pop-Location
+        }
+
+        $result.ExitCode | Should Be 0
+        $result.Output | Should Match '設定の検証に成功しました'
     }
 
     It 'fails validation for a missing settings file' {
