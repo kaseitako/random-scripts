@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/startup-virtual-desktop-setting.schema.json",
+  "title": "Startup Virtual Desktop settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["desktops"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "desktops": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/desktop"
+      }
+    }
+  },
+  "$defs": {
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "apps": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/application"
+          }
+        },
+        "wallpaperAbsolutePath": {
+          "type": "string",
+          "default": ""
+        },
+        "waitSeconds": {
+          "type": "number",
+          "deprecated": true,
+          "description": "Accepted for backward compatibility and ignored."
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "workingDirectory": {
+          "type": "string",
+          "default": ""
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30
+        },
+        "onExisting": {
+          "type": "string",
+          "enum": ["Move", "Skip", "Launch"],
+          "default": "Move"
+        },
+        "maximized": {
+          "type": "boolean",
+          "default": false
+        },
+        "fullscreen": {
+          "type": "boolean",
+          "deprecated": true,
+          "description": "Backward-compatible alias for maximized."
+        },
+        "windowMatch": {
+          "$ref": "#/$defs/windowMatch"
+        }
+      }
+    },
+    "windowMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "processName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "titleRegex": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classNameRegex": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

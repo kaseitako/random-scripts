@@ -41,7 +41,7 @@ The core accepts an adapter object made of callable operations. Tests use an in-
 
 1. Resolve every project path from `$PSScriptRoot`.
 2. Acquire a named per-user mutex. Exit successfully with a warning if another run is active.
-3. Verify Windows, PowerShell, VirtualDesktop module version 1.5.11 or later, and Explorer readiness.
+3. Verify Windows, PowerShell, VirtualDesktop module version 1.5.9 or later, and Explorer readiness; warn below the recommended 1.5.11.
 4. Read, normalize, and validate the JSON settings.
 5. Create or retrieve all named desktops before launching applications.
 6. Apply each configured per-desktop wallpaper through `Set-DesktopWallpaper` when available.

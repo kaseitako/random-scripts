@@ -6,7 +6,7 @@
 
 **Architecture:** A platform-independent PowerShell core normalizes settings, selects windows, polls with bounded timeouts, and orchestrates reconciliation through an injected adapter. A Windows adapter supplies Win32 window enumeration, process launch, PSVirtualDesktop integration, wallpaper handling, and maximization; the entry script owns dependency checks, logging, and the single-instance mutex.
 
-**Tech Stack:** PowerShell 7.5+, Pester 3.4-compatible tests, PSVirtualDesktop 1.5.11+, Win32 user32 APIs
+**Tech Stack:** PowerShell 7.5+, Pester 3.4-compatible tests, PSVirtualDesktop 1.5.9+ (1.5.11 recommended), Win32 user32 APIs
 
 ## Global Constraints
 
