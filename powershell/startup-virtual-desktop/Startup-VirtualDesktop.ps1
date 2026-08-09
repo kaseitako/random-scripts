@@ -14,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 function Resolve-StartupPath {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Path,
 
         [Parameter(Mandatory)]
