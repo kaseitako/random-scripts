@@ -117,3 +117,99 @@ Describe 'Test-DesktopLayoutSettings' {
         Test-DesktopLayoutSettings -Settings $settings
     }
 }
+
+Describe 'Get-WindowMatchScore' {
+    BeforeEach {
+        $script:window = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'chrome'
+            Title = 'SoundCloud'
+            ClassName = 'Chrome_WidgetWin_1'
+        }
+        $script:app = [pscustomobject]@{
+            timeoutSeconds = 1
+            inferredProcessName = 'chrome'
+            preferredTitle = ''
+            startedProcessId = 0
+            windowMatch = $null
+        }
+    }
+
+    It 'requires every explicit match field' {
+        $script:app.windowMatch = [pscustomobject]@{
+            processName = 'chrome'
+            titleRegex = '^SoundCloud$'
+            classNameRegex = '^Chrome_WidgetWin_1$'
+        }
+
+        Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{} -ExcludedHandles @{} | Should BeGreaterThan 0
+
+        $script:window.Title = 'Different'
+        Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{} -ExcludedHandles @{} | Should Be -1
+    }
+
+    It 'prefers a new matching process window' {
+        $existing = [pscustomobject]@{
+            Handle = [long]7; ProcessId = 70; ProcessName = 'chrome'; Title = 'Chrome'; ClassName = 'Chrome_WidgetWin_1'
+        }
+
+        $newScore = Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{ 42 = $true } -ExcludedHandles @{}
+        $existingScore = Get-WindowMatchScore -Window $existing -App $script:app -NewHandles @{ 42 = $true } -ExcludedHandles @{}
+
+        $newScore | Should BeGreaterThan $existingScore
+    }
+
+    It 'rejects a previously assigned handle' {
+        Get-WindowMatchScore -Window $script:window -App $script:app -NewHandles @{} -ExcludedHandles @{ 42 = $true } | Should Be -1
+    }
+}
+
+Describe 'Wait-ApplicationWindow' {
+    BeforeEach {
+        $script:window = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'notepad'
+            Title = 'Untitled - Notepad'
+            ClassName = 'Notepad'
+        }
+        $script:app = [pscustomobject]@{
+            timeoutSeconds = 1
+            inferredProcessName = 'notepad'
+            preferredTitle = ''
+            startedProcessId = 100
+            windowMatch = $null
+        }
+    }
+
+    It 'returns a matching window after it appears' {
+        $script:calls = 0
+        $script:now = [datetime]'2026-08-09T00:00:00Z'
+        $adapter = [pscustomobject]@{
+            GetWindows = {
+                $script:calls++
+                if ($script:calls -lt 3) { @() } else { @($script:window) }
+            }
+            GetUtcNow = { $script:now }
+            Wait = { param($Milliseconds) $script:now = $script:now.AddMilliseconds($Milliseconds) }
+        }
+
+        $result = Wait-ApplicationWindow -App $script:app -Adapter $adapter -BeforeHandles @{} -ExcludedHandles @{}
+
+        $result.Handle | Should Be 42
+    }
+
+    It 'returns null when the timeout expires' {
+        $script:now = [datetime]'2026-08-09T00:00:00Z'
+        $adapter = [pscustomobject]@{
+            GetWindows = { @() }
+            GetUtcNow = { $script:now }
+            Wait = { param($Milliseconds) $script:now = $script:now.AddMilliseconds($Milliseconds) }
+        }
+
+        $result = Wait-ApplicationWindow -App $script:app -Adapter $adapter -BeforeHandles @{} -ExcludedHandles @{}
+
+        $result | Should BeNullOrEmpty
+    }
+}
