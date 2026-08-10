@@ -117,6 +117,23 @@ function Get-VisibleTopLevelWindows {
     return $windows.ToArray()
 }
 
+function Get-DesktopShortcutMetadata {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($Path)
+    $targetPath = [string]$shortcut.TargetPath
+
+    return [pscustomobject]@{
+        targetPath = $targetPath
+        preferredTitle = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        trackStartedProcess = -not [string]::IsNullOrWhiteSpace($targetPath)
+    }
+}
+
 function Resolve-DesktopApplication {
     param(
         [Parameter(Mandatory)]
@@ -127,14 +144,15 @@ function Resolve-DesktopApplication {
     $launchPath = $configuredPath
     $inferredProcessName = [System.IO.Path]::GetFileNameWithoutExtension($configuredPath)
     $preferredTitle = ''
+    $trackStartedProcess = $true
 
     if ([System.IO.Path]::GetExtension($configuredPath).Equals('.lnk', [System.StringComparison]::OrdinalIgnoreCase) -and
         (Test-Path -LiteralPath $configuredPath -PathType Leaf)) {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($configuredPath)
-        $preferredTitle = [System.IO.Path]::GetFileNameWithoutExtension($configuredPath)
-        if (-not [string]::IsNullOrWhiteSpace($shortcut.TargetPath)) {
-            $inferredProcessName = [System.IO.Path]::GetFileNameWithoutExtension($shortcut.TargetPath)
+        $shortcutMetadata = Get-DesktopShortcutMetadata -Path $configuredPath
+        $preferredTitle = $shortcutMetadata.preferredTitle
+        $trackStartedProcess = $shortcutMetadata.trackStartedProcess
+        if (-not [string]::IsNullOrWhiteSpace($shortcutMetadata.targetPath)) {
+            $inferredProcessName = [System.IO.Path]::GetFileNameWithoutExtension($shortcutMetadata.targetPath)
         }
     } elseif (Test-Path -LiteralPath $configuredPath -PathType Leaf) {
         $launchPath = (Get-Item -LiteralPath $configuredPath -ErrorAction Stop).FullName
@@ -158,6 +176,7 @@ function Resolve-DesktopApplication {
         windowMatch = $App.windowMatch
         inferredProcessName = $inferredProcessName
         preferredTitle = $preferredTitle
+        trackStartedProcess = $trackStartedProcess
         startedProcessId = 0
     }
 }
