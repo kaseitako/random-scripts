@@ -64,6 +64,27 @@ Describe 'New-WindowsDesktopAdapter' {
         $resolved.inferredProcessName | Should Be 'notepad'
         $resolved.preferredTitle | Should Be 'My App'
         $resolved.launchPath | Should Be $shortcutPath
+        $resolved.trackStartedProcess | Should Be $true
+    }
+
+    It 'does not track a shell shortcut without a target path' {
+        $shortcutPath = Join-Path $TestDrive 'Spotify.lnk'
+        $null = New-Item -ItemType File -Path $shortcutPath
+        Mock Get-DesktopShortcutMetadata -ModuleName StartupVirtualDesktop.Windows {
+            [pscustomobject]@{
+                targetPath = ''
+                preferredTitle = 'Spotify'
+                trackStartedProcess = $false
+            }
+        } -ParameterFilter { $Path -eq $shortcutPath }
+        $adapter = New-WindowsDesktopAdapter
+        $resolveApplication = $adapter.ResolveApplication
+
+        $resolved = & $resolveApplication (New-WindowsTestApp -Path $shortcutPath)
+
+        $resolved.inferredProcessName | Should Be 'Spotify'
+        $resolved.preferredTitle | Should Be 'Spotify'
+        $resolved.trackStartedProcess | Should Be $false
     }
 
     It 'enumerates visible top-level windows without mutating them' {
