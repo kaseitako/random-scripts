@@ -189,8 +189,15 @@ function Start-DesktopApplication {
 
     $options = @{
         FilePath = $App.launchPath
-        PassThru = $true
         ErrorAction = 'Stop'
+    }
+    $trackStartedProcess = if ($App.PSObject.Properties.Name -contains 'trackStartedProcess') {
+        [bool]$App.trackStartedProcess
+    } else {
+        $true
+    }
+    if ($trackStartedProcess) {
+        $options.PassThru = $true
     }
     if (@($App.arguments).Count -gt 0) {
         $options.ArgumentList = @($App.arguments)
@@ -201,7 +208,7 @@ function Start-DesktopApplication {
 
     $process = Start-Process @options
     return [pscustomobject]@{
-        ProcessId = if ($null -ne $process) { $process.Id } else { 0 }
+        ProcessId = if ($trackStartedProcess -and $null -ne $process) { $process.Id } else { 0 }
     }
 }
 
