@@ -103,6 +103,47 @@ Describe 'New-WindowsDesktopAdapter' {
     }
 }
 
+Describe 'Start-DesktopApplication process tracking' {
+    It 'defaults to PassThru and returns the process id when the tracking flag is omitted' {
+        Mock Start-Process -ModuleName StartupVirtualDesktop.Windows {
+            [pscustomobject]@{ Id = 4321 }
+        }
+        $adapter = New-WindowsDesktopAdapter
+        $startApplication = $adapter.StartApplication
+        $app = [pscustomobject]@{
+            launchPath = 'notepad.exe'
+            arguments = @()
+            workingDirectory = ''
+        }
+
+        $result = & $startApplication $app
+
+        $result.ProcessId | Should Be 4321
+        Assert-MockCalled Start-Process -ModuleName StartupVirtualDesktop.Windows -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'notepad.exe' -and $PassThru -eq $true
+        }
+    }
+
+    It 'omits PassThru and returns zero for an untracked shell launch' {
+        Mock Start-Process -ModuleName StartupVirtualDesktop.Windows
+        $adapter = New-WindowsDesktopAdapter
+        $startApplication = $adapter.StartApplication
+        $app = [pscustomobject]@{
+            launchPath = 'C:\StoreApp.lnk'
+            arguments = @()
+            workingDirectory = ''
+            trackStartedProcess = $false
+        }
+
+        $result = & $startApplication $app
+
+        $result.ProcessId | Should Be 0
+        Assert-MockCalled Start-Process -ModuleName StartupVirtualDesktop.Windows -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'C:\StoreApp.lnk' -and -not $PassThru
+        }
+    }
+}
+
 Describe 'Get-StartupEnvironmentDiagnostics' {
     It 'reports the runtime and module versions' {
         $diagnostics = Get-StartupEnvironmentDiagnostics
