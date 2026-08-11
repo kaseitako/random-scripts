@@ -344,6 +344,7 @@ function Update-ApplicationWindowSelection {
     foreach ($window in @($Windows)) {
         if ([long]$window.Handle -eq $selectedHandle -and
             [int]$window.ProcessId -eq [int]$SelectedWindow.ProcessId) {
+            $AssignedHandles[[string]$selectedHandle] = $true
             return $window
         }
     }
