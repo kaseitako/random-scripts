@@ -298,6 +298,7 @@ function Get-BestApplicationWindow {
         [object]$App,
 
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Windows,
 
         [Parameter(Mandatory)]
@@ -321,6 +322,39 @@ function Get-BestApplicationWindow {
     }
 
     return $bestWindow
+}
+
+function Update-ApplicationWindowSelection {
+    param(
+        [Parameter(Mandatory)]
+        [object]$App,
+
+        [Parameter(Mandatory)]
+        [object]$SelectedWindow,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Windows,
+
+        [Parameter(Mandatory)]
+        [hashtable]$AssignedHandles
+    )
+
+    $selectedHandle = [long]$SelectedWindow.Handle
+    foreach ($window in @($Windows)) {
+        if ([long]$window.Handle -eq $selectedHandle -and
+            [int]$window.ProcessId -eq [int]$SelectedWindow.ProcessId) {
+            return $window
+        }
+    }
+
+    $null = $AssignedHandles.Remove([string]$selectedHandle)
+    $replacement = Get-BestApplicationWindow -App $App -Windows @($Windows) -ExcludedHandles $AssignedHandles
+    if ($null -ne $replacement) {
+        $AssignedHandles[[string][long]$replacement.Handle] = $true
+    }
+
+    return $replacement
 }
 
 function New-ApplicationResult {
@@ -403,6 +437,8 @@ function Invoke-DesktopLayout {
     $moveWindow = $Adapter.MoveWindow
     $testWindow = $Adapter.TestWindow
     $maximizeWindow = $Adapter.MaximizeWindow
+    $wait = $Adapter.Wait
+    $placementAttemptLimit = 5
 
     foreach ($desktop in @($Settings.desktops)) {
         try {
@@ -485,12 +521,49 @@ function Invoke-DesktopLayout {
                 }
 
                 $status = 'AlreadyPlaced'
-                if (-not (& $testWindow $targetDesktop $window)) {
-                    $null = & $moveWindow $targetDesktop $window
-                    if (-not (& $testWindow $targetDesktop $window)) {
-                        throw 'Window movement verification failed.'
+                $placementSucceeded = $false
+                $placementError = $null
+                for ($placementAttempt = 1; $placementAttempt -le $placementAttemptLimit; $placementAttempt++) {
+                    $previousWindow = $window
+                    $currentWindow = Update-ApplicationWindowSelection -App $app -SelectedWindow $window -Windows @(& $getWindows) -AssignedHandles $assignedHandles
+
+                    if ($null -eq $currentWindow) {
+                        $placementError = [System.InvalidOperationException]::new('Application window disappeared before placement.')
+                    } else {
+                        $window = $currentWindow
+                        if ([long]$previousWindow.Handle -ne [long]$window.Handle) {
+                            Write-DesktopLayoutLog -Log $Log -Level 'Warning' -Message 'Application window handle changed; retrying placement.' -Data @{
+                                desktopName = $desktop.name
+                                path = $app.path
+                                previousHandle = [long]$previousWindow.Handle
+                                replacementHandle = [long]$window.Handle
+                                attempt = $placementAttempt
+                            }
+                        }
+
+                        try {
+                            $status = 'AlreadyPlaced'
+                            if (-not (& $testWindow $targetDesktop $window)) {
+                                $null = & $moveWindow $targetDesktop $window
+                                if (-not (& $testWindow $targetDesktop $window)) {
+                                    throw 'Window movement verification failed.'
+                                }
+                                $status = 'Moved'
+                            }
+                            $placementSucceeded = $true
+                            break
+                        } catch {
+                            $placementError = $_.Exception
+                        }
                     }
-                    $status = 'Moved'
+
+                    if ($placementAttempt -lt $placementAttemptLimit) {
+                        & $wait 200
+                    }
+                }
+
+                if (-not $placementSucceeded) {
+                    throw $placementError
                 }
 
                 if ($app.maximized) {
