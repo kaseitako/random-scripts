@@ -403,6 +403,162 @@ Describe 'Invoke-DesktopLayout' {
         $results[1].Handle | Should Be 43
     }
 
+    It 'reacquires a replacement window when the selected handle becomes invalid' {
+        $oldWindow = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'LINE'
+            Title = 'LINE'
+            ClassName = 'Chrome_WidgetWin_1'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:replacementWindow = [pscustomobject]@{
+            Handle = [long]43
+            ProcessId = 100
+            ProcessName = 'LINE'
+            Title = 'LINE'
+            ClassName = 'Chrome_WidgetWin_1'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:windows = @($oldWindow)
+        $script:waitCount = 0
+        $script:logEntries = [System.Collections.Generic.List[object]]::new()
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            if ([long]$Window.Handle -eq 42) {
+                $script:windows = @($script:replacementWindow)
+                throw [System.InvalidOperationException]::new('TYPE_E_ELEMENTNOTFOUND')
+            }
+            $Window.Desktop -eq $Desktop.Name
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{
+            path = 'LINE'
+            windowMatch = [pscustomobject]@{
+                processName = 'LINE'
+                titleRegex = '^LINE$'
+            }
+        })
+        $log = {
+            param($Level, $Message, $Data)
+            $script:logEntries.Add([pscustomobject]@{
+                Level = $Level
+                Message = $Message
+                Data = $Data
+            })
+        }
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log $log)
+
+        $results[0].Status | Should Be 'Moved'
+        $results[0].Handle | Should Be 43
+        $script:moveCount | Should Be 1
+        $script:startCount | Should Be 0
+        $script:waitCount | Should Be 1
+        $recoveryLog = @($script:logEntries | Where-Object Message -eq 'Application window handle changed; retrying placement.')
+        $recoveryLog.Count | Should Be 1
+        $recoveryLog[0].Level | Should Be 'Warning'
+        $recoveryLog[0].Data.previousHandle | Should Be 42
+        $recoveryLog[0].Data.replacementHandle | Should Be 43
+        $recoveryLog[0].Data.attempt | Should Be 2
+    }
+
+    It 'stops replacement polling after five placement attempts and continues' {
+        $lineWindow = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'LINE'
+            Title = 'LINE'
+            ClassName = 'Chrome_WidgetWin_1'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:notepadWindow = [pscustomobject]@{
+            Handle = [long]43
+            ProcessId = 101
+            ProcessName = 'notepad'
+            Title = 'Notepad'
+            ClassName = 'Notepad'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:windows = @($lineWindow, $script:notepadWindow)
+        $script:waitCount = 0
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            if ([long]$Window.Handle -eq 42) {
+                $script:windows = @($script:notepadWindow)
+                throw [System.InvalidOperationException]::new('TYPE_E_ELEMENTNOTFOUND')
+            }
+            $Window.Desktop -eq $Desktop.Name
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @(
+            [pscustomobject]@{
+                path = 'LINE'
+                windowMatch = [pscustomobject]@{
+                    processName = 'LINE'
+                    titleRegex = '^LINE$'
+                }
+            },
+            [pscustomobject]@{ path = 'notepad' }
+        )
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results.Count | Should Be 2
+        $results[0].Status | Should Be 'Failed'
+        $results[0].Error | Should Match 'disappeared before placement'
+        $results[1].Status | Should Be 'Moved'
+        $results[1].Handle | Should Be 43
+        $script:waitCount | Should Be 4
+    }
+
+    It 'rejects a reused handle that no longer matches the selected application' {
+        $script:oldWindow = [pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'LINE'; Title = 'LINE'; ClassName = 'Chrome_WidgetWin_1'; Desktop = 'Other'; Maximized = $false
+        }
+        $script:reusedHandleWindow = [pscustomobject]@{
+            Handle = [long]42; ProcessId = 101; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
+        }
+        $script:replacementWindow = [pscustomobject]@{
+            Handle = [long]43; ProcessId = 100; ProcessName = 'LINE'; Title = 'LINE'; ClassName = 'Chrome_WidgetWin_1'; Desktop = 'Other'; Maximized = $false
+        }
+        $script:getWindowsCount = 0
+        $script:adapter.GetWindows = {
+            $script:getWindowsCount++
+            if ($script:getWindowsCount -eq 1) {
+                @($script:oldWindow)
+            } else {
+                @($script:reusedHandleWindow, $script:replacementWindow)
+            }
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{
+            path = 'LINE'
+            windowMatch = [pscustomobject]@{
+                processName = 'LINE'
+                titleRegex = '^LINE$'
+            }
+        })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Moved'
+        $results[0].Handle | Should Be 43
+        $script:reusedHandleWindow.Desktop | Should Be 'Other'
+        $script:replacementWindow.Desktop | Should Be 'Main'
+    }
+
     It 'honors Skip for an existing matching window' {
         $script:windows = @([pscustomobject]@{
             Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Other'; Maximized = $false
