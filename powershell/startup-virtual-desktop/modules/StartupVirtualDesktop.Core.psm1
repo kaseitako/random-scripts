@@ -523,6 +523,7 @@ function Invoke-DesktopLayout {
 
                 $status = 'AlreadyPlaced'
                 $placementSucceeded = $false
+                $windowMoved = $false
                 $placementError = $null
                 for ($placementAttempt = 1; $placementAttempt -le $placementAttemptLimit; $placementAttempt++) {
                     $previousWindow = $window
@@ -532,6 +533,12 @@ function Invoke-DesktopLayout {
                         $placementError = [System.InvalidOperationException]::new('Application window disappeared before placement.')
                     } else {
                         $window = $currentWindow
+                        $selectionChanged = (
+                            [long]$previousWindow.Handle -ne [long]$window.Handle -or
+                            [int]$previousWindow.ProcessId -ne [int]$window.ProcessId)
+                        if ($selectionChanged) {
+                            $windowMoved = $false
+                        }
                         if ([long]$previousWindow.Handle -ne [long]$window.Handle) {
                             Write-DesktopLayoutLog -Log $Log -Level 'Warning' -Message 'Application window handle changed; retrying placement.' -Data @{
                                 desktopName = $desktop.name
@@ -543,13 +550,14 @@ function Invoke-DesktopLayout {
                         }
 
                         try {
-                            $status = 'AlreadyPlaced'
+                            $status = if ($windowMoved) { 'Moved' } else { 'AlreadyPlaced' }
                             if (-not (& $testWindow $targetDesktop $window)) {
                                 $null = & $moveWindow $targetDesktop $window
+                                $windowMoved = $true
+                                $status = 'Moved'
                                 if (-not (& $testWindow $targetDesktop $window)) {
                                     throw 'Window movement verification failed.'
                                 }
-                                $status = 'Moved'
                             }
                             $placementSucceeded = $true
                             break
