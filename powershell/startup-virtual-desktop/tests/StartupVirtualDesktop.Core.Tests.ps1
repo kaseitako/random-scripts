@@ -524,6 +524,43 @@ Describe 'Invoke-DesktopLayout' {
         $script:waitCount | Should Be 4
     }
 
+    It 'handles an empty window list while polling for a replacement' {
+        $lineWindow = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'LINE'
+            Title = 'LINE'
+            ClassName = 'Chrome_WidgetWin_1'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:windows = @($lineWindow)
+        $script:waitCount = 0
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            $script:windows = @()
+            throw [System.InvalidOperationException]::new('TYPE_E_ELEMENTNOTFOUND')
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{
+            path = 'LINE'
+            windowMatch = [pscustomobject]@{
+                processName = 'LINE'
+                titleRegex = '^LINE$'
+            }
+        })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Failed'
+        $results[0].Error | Should Match 'disappeared before placement'
+        $script:waitCount | Should Be 4
+    }
+
     It 'rejects a reused handle that no longer matches the selected application' {
         $script:oldWindow = [pscustomobject]@{
             Handle = [long]42; ProcessId = 100; ProcessName = 'LINE'; Title = 'LINE'; ClassName = 'Chrome_WidgetWin_1'; Desktop = 'Other'; Maximized = $false
