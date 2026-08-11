@@ -322,6 +322,41 @@ Describe 'Invoke-DesktopLayout' {
         $script:maximizeCount | Should Be 1
     }
 
+    It 'preserves Moved after a transient post-move verification failure' {
+        $script:windows = @([pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'notepad'
+            Title = 'Untitled - Notepad'
+            ClassName = 'Notepad'
+            Desktop = 'Other'
+            Maximized = $false
+        })
+        $script:testWindowCount = 0
+        $script:waitCount = 0
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            $script:testWindowCount++
+            if ($script:testWindowCount -eq 2) {
+                return $false
+            }
+            $Window.Desktop -eq $Desktop.Name
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'Moved'
+        $script:moveCount | Should Be 1
+        $script:testWindowCount | Should Be 3
+        $script:waitCount | Should Be 1
+    }
+
     It 'reports an already placed matching window' {
         $script:windows = @([pscustomobject]@{
             Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Main'; Maximized = $false
