@@ -561,6 +561,46 @@ Describe 'Invoke-DesktopLayout' {
         $script:waitCount | Should Be 4
     }
 
+    It 'restores the reservation when the selected window returns after disappearing' {
+        $script:firstWindow = [pscustomobject]@{
+            Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'First'; ClassName = 'Notepad'; Desktop = 'Main'; Maximized = $false
+        }
+        $script:secondWindow = [pscustomobject]@{
+            Handle = [long]43; ProcessId = 101; ProcessName = 'notepad'; Title = 'Second'; ClassName = 'Notepad'; Desktop = 'Main'; Maximized = $false
+        }
+        $script:windows = @($script:firstWindow)
+        $script:firstWindowTestCount = 0
+        $script:waitCount = 0
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            if ([long]$Window.Handle -eq 42 -and $script:firstWindowTestCount -eq 0) {
+                $script:firstWindowTestCount++
+                $script:windows = @()
+                throw [System.InvalidOperationException]::new('TYPE_E_ELEMENTNOTFOUND')
+            }
+            $Window.Desktop -eq $Desktop.Name
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            if ($script:waitCount -eq 2) {
+                $script:windows = @($script:firstWindow, $script:secondWindow)
+            }
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @(
+            [pscustomobject]@{ path = 'notepad' },
+            [pscustomobject]@{ path = 'notepad' }
+        )
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results.Count | Should Be 2
+        $results[0].Handle | Should Be 42
+        $results[1].Handle | Should Be 43
+        $script:waitCount | Should Be 2
+    }
+
     It 'rejects a reused handle that no longer matches the selected application' {
         $script:oldWindow = [pscustomobject]@{
             Handle = [long]42; ProcessId = 100; ProcessName = 'LINE'; Title = 'LINE'; ClassName = 'Chrome_WidgetWin_1'; Desktop = 'Other'; Maximized = $false
