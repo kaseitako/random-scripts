@@ -357,6 +357,54 @@ Describe 'Invoke-DesktopLayout' {
         $script:waitCount | Should Be 1
     }
 
+    It 'resets Moved when placement continues with a replacement window' {
+        $script:oldWindow = [pscustomobject]@{
+            Handle = [long]42
+            ProcessId = 100
+            ProcessName = 'notepad'
+            Title = 'Old'
+            ClassName = 'Notepad'
+            Desktop = 'Other'
+            Maximized = $false
+        }
+        $script:replacementWindow = [pscustomobject]@{
+            Handle = [long]43
+            ProcessId = 100
+            ProcessName = 'notepad'
+            Title = 'Replacement'
+            ClassName = 'Notepad'
+            Desktop = 'Main'
+            Maximized = $false
+        }
+        $script:windows = @($script:oldWindow)
+        $script:oldWindowTestCount = 0
+        $script:waitCount = 0
+        $script:adapter.TestWindow = {
+            param($Desktop, $Window)
+            if ([long]$Window.Handle -eq 42) {
+                $script:oldWindowTestCount++
+                if ($script:oldWindowTestCount -eq 2) {
+                    $script:windows = @($script:replacementWindow)
+                    return $false
+                }
+            }
+            $Window.Desktop -eq $Desktop.Name
+        }
+        $script:adapter.Wait = {
+            param($Milliseconds)
+            $script:waitCount++
+            $script:now = $script:now.AddMilliseconds($Milliseconds)
+        }
+        $settings = New-OrchestrationSettings @([pscustomobject]@{ path = 'notepad' })
+
+        $results = @(Invoke-DesktopLayout -Settings $settings -Adapter $script:adapter -Log { param($Level, $Message, $Data) })
+
+        $results[0].Status | Should Be 'AlreadyPlaced'
+        $results[0].Handle | Should Be 43
+        $script:moveCount | Should Be 1
+        $script:waitCount | Should Be 1
+    }
+
     It 'reports an already placed matching window' {
         $script:windows = @([pscustomobject]@{
             Handle = [long]42; ProcessId = 100; ProcessName = 'notepad'; Title = 'Notepad'; ClassName = 'Notepad'; Desktop = 'Main'; Maximized = $false
